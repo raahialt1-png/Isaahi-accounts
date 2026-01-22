@@ -1,965 +1,617 @@
-import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
-  onAuthStateChanged,
-  signInWithCustomToken
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  query, 
-  where, 
-  getDocs, 
-  updateDoc,
-  doc,
-  deleteDoc,
-  onSnapshot 
-} from 'firebase/firestore';
-import { 
-  User, 
-  Lock, 
-  ArrowRight, 
-  Check, 
-  AlertCircle, 
-  ChevronLeft, 
-  LayoutDashboard, 
-  Link as LinkIcon, 
-  Key, 
-  LogOut,
-  ShieldCheck,
-  Zap,
-  Loader2,
-  Trash2,
-  AlertTriangle
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Isaahi Accounts</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-/* -------------------------------------------------------------------------- */
-/* FIREBASE SETUP                               */
-/* -------------------------------------------------------------------------- */
-
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-/* -------------------------------------------------------------------------- */
-/* CONSTANTS                                 */
-/* -------------------------------------------------------------------------- */
-
-const ALLOWED_DOMAINS = ['isaahi.com', 'isaahi.co', 'isaahi.io'];
-
-const COLLECTIONS = {
-  USERS: 'users',
-  LINKS: 'links'
-};
-
-/* -------------------------------------------------------------------------- */
-/* COMPONENTS                                */
-/* -------------------------------------------------------------------------- */
-
-const Logo = ({ size = 'md' }) => {
-  const sizes = { sm: 'text-xl', md: 'text-2xl', lg: 'text-4xl' };
-  return (
-    <div className={`font-sans font-bold tracking-tight text-blue-600 flex items-center gap-2 ${sizes[size]}`}>
-      <div className="bg-blue-600 text-white p-1 rounded-md">
-        <ShieldCheck size={size === 'lg' ? 32 : 20} strokeWidth={3} />
-      </div>
-      <span>Isaahi</span>
-    </div>
-  );
-};
-
-const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button' }) => {
-  const baseStyle = "px-6 py-2.5 rounded-full font-medium text-sm transition-all duration-200 flex items-center justify-center gap-2";
-  const variants = {
-    primary: "bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed shadow-sm hover:shadow",
-    secondary: "text-blue-600 hover:bg-blue-50 bg-transparent disabled:text-gray-400",
-    outline: "border border-gray-300 text-gray-700 hover:bg-gray-50 bg-white",
-    danger: "bg-red-600 text-white hover:bg-red-700 shadow-sm"
-  };
-
-  return (
-    <button 
-      type={type}
-      onClick={onClick} 
-      disabled={disabled}
-      className={`${baseStyle} ${variants[variant]} ${className}`}
-    >
-      {children}
-    </button>
-  );
-};
-
-const Input = ({ label, type = "text", value, onChange, error, placeholder, suffix, ...props }) => (
-  <div className="w-full mb-4 group">
-    <div className={`relative border rounded-lg px-3 py-2 transition-colors duration-200 focus-within:ring-2 focus-within:ring-blue-100 ${error ? 'border-red-500 focus-within:border-red-500' : 'border-gray-300 focus-within:border-blue-500'}`}>
-      <label className={`block text-xs font-medium mb-1 ${error ? 'text-red-500' : 'text-gray-500 group-focus-within:text-blue-600'}`}>
-        {label}
-      </label>
-      <div className="flex items-center">
-        <input
-          type={type}
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          className="w-full outline-none text-gray-900 placeholder-gray-400 bg-transparent"
-          {...props}
-        />
-        {suffix && <span className="text-gray-500 ml-2 select-none">{suffix}</span>}
-      </div>
-    </div>
-    {error && (
-      <div className="flex items-center gap-1 mt-1 text-xs text-red-600">
-        <AlertCircle size={12} />
-        <span>{error}</span>
-      </div>
-    )}
-  </div>
-);
-
-const Card = ({ children, className = '' }) => (
-  <div className={`bg-white p-8 rounded-2xl shadow-xl w-full max-w-[450px] border border-gray-100 ${className}`}>
-    {children}
-  </div>
-);
-
-/* -------------------------------------------------------------------------- */
-/* MAIN APPLICATION                             */
-/* -------------------------------------------------------------------------- */
-
-export default function IsaahiApp() {
-  const [firebaseUser, setFirebaseUser] = useState(null);
-  const [isaahiUser, setIsaahiUser] = useState(null); // The logged-in custom user
-  const [view, setView] = useState('welcome'); // welcome, login, create-*, dashboard, creator-studio, delete-account
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  
-  // Registration State
-  const [regData, setRegData] = useState({
-    firstName: '',
-    lastName: '',
-    day: '',
-    month: '',
-    year: '',
-    gender: '',
-    emailPrefix: '',
-    domain: 'isaahi.com',
-    password: '',
-    isCreator: false,
-  });
-
-  // Login State
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-
-  // Deletion State
-  const [deleteEmail, setDeleteEmail] = useState('');
-  const [deletePassword, setDeletePassword] = useState('');
-
-  // Dashboard Data
-  const [links, setLinks] = useState([]);
-  const [newLink, setNewLink] = useState({ source: '', destination: '' });
-
-  // --------------------------------------------------------------------------
-  // Firebase Auth Initialization
-  // --------------------------------------------------------------------------
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Auth Error:", err);
-        setError("Failed to initialize system security.");
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // --------------------------------------------------------------------------
-  // Data Fetching (Creator Dashboard)
-  // --------------------------------------------------------------------------
-  useEffect(() => {
-    if (!firebaseUser || !isaahiUser || view !== 'creator-studio') return;
-
-    // Fetch links for this creator
-    const q = query(
-      collection(db, 'artifacts', appId, 'public', 'data', COLLECTIONS.LINKS),
-      where('ownerEmail', '==', isaahiUser.email)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedLinks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setLinks(fetchedLinks);
-    });
-
-    return () => unsubscribe();
-  }, [firebaseUser, isaahiUser, view]);
-
-  // --------------------------------------------------------------------------
-  // Logic: Logout
-  // --------------------------------------------------------------------------
-  const logout = () => {
-    setIsaahiUser(null);
-    setLoginEmail('');
-    setLoginPassword('');
-    setView('welcome');
-    // Reset deletion state
-    setDeleteEmail('');
-    setDeletePassword('');
-    // Reset registration state
-    setRegData({
-      firstName: '',
-      lastName: '',
-      day: '',
-      month: '',
-      year: '',
-      gender: '',
-      emailPrefix: '',
-      domain: 'isaahi.com',
-      password: '',
-      isCreator: false,
-    });
-  };
-
-  // --------------------------------------------------------------------------
-  // Handlers: Account Creation
-  // --------------------------------------------------------------------------
-  const handleCreateAccount = async () => {
-    if (!firebaseUser) return;
-    setLoading(true);
-    setError('');
-
-    try {
-      const fullEmail = `${regData.emailPrefix}@${regData.domain}`;
-      
-      // Check if email exists
-      const q = query(
-        collection(db, 'artifacts', appId, 'public', 'data', COLLECTIONS.USERS),
-        where('email', '==', fullEmail)
-      );
-      const snapshot = await getDocs(q);
-      
-      if (!snapshot.empty) {
-        setError('That email is already taken. Try another.');
-        setLoading(false);
-        return;
-      }
-
-      // Create User
-      const newUser = {
-        firstName: regData.firstName,
-        lastName: regData.lastName,
-        displayName: `${regData.firstName} ${regData.lastName}`,
-        email: fullEmail,
-        password: regData.password, 
-        birthday: `${regData.month}/${regData.day}/${regData.year}`,
-        gender: regData.gender,
-        isCreator: regData.isCreator,
-        createdAt: new Date().toISOString(),
-        apiKey: regData.isCreator ? 'isaahi_live_' + Math.random().toString(36).substr(2, 9) : null
-      };
-
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', COLLECTIONS.USERS), newUser);
-
-      // Auto-login
-      setIsaahiUser(newUser);
-      setView(newUser.isCreator ? 'creator-studio' : 'dashboard');
-
-    } catch (err) {
-      console.error(err);
-      setError('Failed to create account. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // --------------------------------------------------------------------------
-  // Handlers: Login
-  // --------------------------------------------------------------------------
-  const handleLogin = async (targetView = 'dashboard') => {
-    if (!firebaseUser) return;
-    setLoading(true);
-    setError('');
-
-    try {
-      const q = query(
-        collection(db, 'artifacts', appId, 'public', 'data', COLLECTIONS.USERS),
-        where('email', '==', loginEmail)
-      );
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        setError("Couldn't find your Isaahi Account.");
-        setLoading(false);
-        return;
-      }
-
-      const userData = snapshot.docs[0].data();
-
-      if (userData.password !== loginPassword) {
-        setError("Wrong password. Try again.");
-        setLoading(false);
-        return;
-      }
-
-      // If trying to access creator studio but not a creator
-      if (targetView === 'creator-studio' && !userData.isCreator) {
-        setError("This account is not a Creator account.");
-        setLoading(false);
-        return;
-      }
-
-      setIsaahiUser({ id: snapshot.docs[0].id, ...userData });
-      setView(targetView);
-
-    } catch (err) {
-      console.error(err);
-      setError("An error occurred during sign in.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // --------------------------------------------------------------------------
-  // Handlers: Account Deletion
-  // --------------------------------------------------------------------------
-  const handleDeleteAccount = async () => {
-    if (!isaahiUser || !isaahiUser.id) return;
-    setLoading(true);
-    setError('');
-
-    // 1. Verify credentials locally
-    if (deleteEmail !== isaahiUser.email) {
-      setError('Email does not match your account.');
-      setLoading(false);
-      return;
-    }
-
-    if (deletePassword !== isaahiUser.password) {
-      setError('Incorrect password.');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      // 2. Delete user document
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', COLLECTIONS.USERS, isaahiUser.id));
-      
-      // 3. Optional: Delete links associated with user? 
-      // For now we will leave them or we could query and delete batch.
-      // Keeping it simple: just delete the user profile.
-      
-      logout(); // Return to welcome screen
-    } catch (err) {
-      console.error("Deletion failed:", err);
-      setError("Failed to delete account. Please try again later.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // --------------------------------------------------------------------------
-  // Handlers: Dashboard Actions
-  // --------------------------------------------------------------------------
-  const createLink = async () => {
-    if (!newLink.source || !newLink.destination) return;
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', COLLECTIONS.LINKS), {
-        ownerEmail: isaahiUser.email,
-        source: newLink.source,
-        destination: newLink.destination,
-        clicks: 0,
-        createdAt: new Date().toISOString()
-      });
-      setNewLink({ source: '', destination: '' });
-    } catch (err) {
-      console.error("Error creating link:", err);
-    }
-  };
-
-  const deleteLink = async (id) => {
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', COLLECTIONS.LINKS, id));
-    } catch (err) {
-      console.error("Error deleting link:", err);
-    }
-  };
-
-  const regenerateKey = async () => {
-    const newKey = 'isaahi_live_' + Math.random().toString(36).substr(2, 16);
-    try {
-      if (isaahiUser.id) {
-         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', COLLECTIONS.USERS, isaahiUser.id), {
-           apiKey: newKey
-         });
-         setIsaahiUser(prev => ({ ...prev, apiKey: newKey }));
-      }
-    } catch (e) { console.error(e); }
-  };
-
-  /* -------------------------------------------------------------------------- */
-  /* VIEWS                                       */
-  /* -------------------------------------------------------------------------- */
-
-  // VIEW: WELCOME
-  if (view === 'welcome') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <Card className="flex flex-col items-center text-center space-y-8 py-12">
-          <Logo size="lg" />
-          <div className="space-y-2">
-            <h1 className="text-2xl font-normal text-gray-900">Sign in</h1>
-            <p className="text-gray-600">to continue to Isaahi</p>
-          </div>
-          
-          <div className="w-full space-y-4">
-            <Input 
-              label="Email or phone"
-              value={loginEmail}
-              onChange={(e) => setLoginEmail(e.target.value)}
-              error={error}
-            />
-            
-            <div className="flex justify-between items-center w-full pt-2">
-              <button 
-                onClick={() => setView('create-name')}
-                className="text-blue-600 font-medium hover:bg-blue-50 px-3 py-1.5 rounded"
-              >
-                Create account
-              </button>
-              <Button onClick={() => setView('login-password')}>Next</Button>
-            </div>
-          </div>
-        </Card>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         
-        <div className="mt-8 flex gap-8 text-xs text-gray-500">
-          <button className="hover:text-gray-700">Help</button>
-          <button className="hover:text-gray-700">Privacy</button>
-          <button className="hover:text-gray-700">Terms</button>
-          <button onClick={() => setView('creator-login')} className="hover:text-blue-600 font-medium text-blue-500">
-            Creator Studio
-          </button>
-        </div>
-      </div>
-    );
-  }
+        .view-section { display: none; opacity: 0; transition: opacity 0.3s ease; }
+        
+        /* Utility classes for view switching */
+        .view-section.active { display: flex; opacity: 1; }
+        .view-section.active-block { display: block; opacity: 1; }
+        
+        .glass-card {
+            background: white;
+            border: 1px solid #f1f5f9;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.05);
+            border-radius: 1.5rem;
+        }
 
-  // VIEW: LOGIN PASSWORD
-  if (view === 'login-password') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <Card className="flex flex-col items-center text-center space-y-8 py-12">
-          <Logo size="md" />
-          <div className="space-y-1">
-            <h1 className="text-xl font-normal text-gray-900">Welcome</h1>
-            <div className="flex items-center gap-2 justify-center px-3 py-1 rounded-full border border-gray-200 text-sm text-gray-700 cursor-pointer hover:bg-gray-50" onClick={() => setView('welcome')}>
-              <User size={14} />
-              {loginEmail}
+        .input-wrapper {
+            transition: all 0.2s;
+        }
+        .input-wrapper:focus-within {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+        }
+
+        .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="text-slate-900 selection:bg-blue-100 selection:text-blue-700">
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed top-5 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-full max-w-sm px-4 pointer-events-none"></div>
+
+    <!-- App Container -->
+    <div id="app" class="min-h-screen flex flex-col">
+
+        <!-- Navigation Bar (Dashboard Only) -->
+        <nav id="main-nav" class="hidden border-b px-6 py-4 bg-white sticky top-0 z-40 justify-between items-center">
+            <div class="flex items-center gap-2 text-blue-600 font-bold text-xl tracking-tight cursor-pointer" onclick="router.go('dashboard')">
+                <i data-lucide="shield-check" class="fill-blue-600 text-white p-0.5 rounded"></i>
+                <span>Isaahi</span>
             </div>
-          </div>
-
-          <div className="w-full space-y-6 pt-4">
-             <Input 
-              label="Enter your password"
-              type="password"
-              value={loginPassword}
-              onChange={(e) => setLoginPassword(e.target.value)}
-              error={error}
-            />
-             
-            <div className="flex justify-between items-center w-full">
-              <button className="text-blue-600 font-medium text-sm hover:underline">
-                Forgot password?
-              </button>
-              <Button onClick={() => handleLogin('dashboard')} disabled={loading}>
-                {loading ? 'Signing in...' : 'Sign in'}
-              </Button>
+            <div class="flex items-center gap-6">
+                <button onclick="router.go('manual')" class="text-xs font-bold text-slate-400 hover:text-blue-600 uppercase tracking-widest transition-colors">Manual</button>
+                <div class="text-right hidden sm:block">
+                    <div id="nav-user-name" class="text-sm font-bold text-slate-900"></div>
+                    <div id="nav-user-role" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest"></div>
+                </div>
+                <button onclick="authManager.logout()" class="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-red-500 transition-colors">
+                    <i data-lucide="log-out" width="18"></i>
+                </button>
             </div>
-          </div>
-        </Card>
-      </div>
-    );
-  }
+        </nav>
 
-  // VIEW: CREATOR LOGIN (Specific entry point)
-  if (view === 'creator-login') {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-[400px] bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700 text-white">
-          <div className="flex items-center gap-2 mb-8">
-            <Zap className="text-yellow-400" />
-            <span className="font-bold text-xl">Isaahi Creators</span>
-          </div>
+        <!-- VIEW: WELCOME -->
+        <section id="view-welcome" class="view-section active flex-1 flex-col items-center justify-center p-4">
+            <div class="glass-card p-10 w-full max-w-[450px] text-center fade-in">
+                <div class="mb-8 flex justify-center text-blue-600">
+                    <i data-lucide="shield-check" width="48" height="48"></i>
+                </div>
+                <h1 class="text-2xl font-normal mb-1">Sign in</h1>
+                <p class="text-slate-500 text-sm mb-8">to continue to Isaahi</p>
 
-          <h2 className="text-2xl font-bold mb-6">Studio Login</h2>
-          
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Creator Email</label>
-              <input 
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-white focus:border-yellow-400 outline-none"
-                placeholder="you@isaahi.co"
-              />
+                <div class="text-left mb-6">
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Email or phone</label>
+                    <div class="input-wrapper border border-slate-300 rounded-lg px-3 py-2 bg-white">
+                        <input type="text" id="login-email" class="w-full outline-none text-sm" placeholder="name@isaahi.com">
+                    </div>
+                </div>
+
+                <div class="flex justify-between items-center">
+                    <button onclick="router.go('create-name')" class="text-blue-600 font-medium text-sm hover:bg-blue-50 px-3 py-1.5 rounded transition-colors">Create account</button>
+                    <button onclick="actions.checkEmail()" class="bg-blue-600 text-white px-6 py-2.5 rounded-full font-medium text-sm hover:bg-blue-700 transition-colors shadow-sm">Next</button>
+                </div>
+                
+                <div class="mt-8 pt-8 border-t border-slate-50">
+                     <button onclick="router.go('manual')" class="text-xs font-medium text-slate-400 hover:text-blue-600 flex items-center justify-center gap-1 mx-auto transition-colors">
+                        <i data-lucide="terminal" width="12"></i> Developer Docs
+                     </button>
+                </div>
             </div>
-            <div className="space-y-1">
-              <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Password</label>
-              <input 
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-white focus:border-yellow-400 outline-none"
-              />
+        </section>
+
+        <!-- VIEW: LOGIN PASSWORD -->
+        <section id="view-login-password" class="view-section flex-1 flex-col items-center justify-center p-4">
+            <div class="glass-card p-10 w-full max-w-[450px] text-center fade-in">
+                <div class="mb-6 flex justify-center text-blue-600">
+                    <i data-lucide="shield-check" width="32" height="32"></i>
+                </div>
+                <div id="display-email" class="bg-slate-100 px-4 py-1 rounded-full text-sm font-medium text-slate-600 inline-block mb-8"></div>
+
+                <div class="text-left mb-6">
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Password</label>
+                    <div class="input-wrapper border border-slate-300 rounded-lg px-3 py-2 bg-white">
+                        <input type="password" id="login-password" class="w-full outline-none text-sm">
+                    </div>
+                </div>
+
+                <div class="flex justify-between items-center mt-8">
+                    <button onclick="router.go('welcome')" class="text-slate-500 font-medium text-sm hover:text-slate-800">Back</button>
+                    <button id="btn-login" onclick="actions.login()" class="bg-blue-600 text-white px-6 py-2.5 rounded-full font-medium text-sm hover:bg-blue-700 transition-colors shadow-sm">Sign in</button>
+                </div>
             </div>
+        </section>
 
-            {error && <div className="p-3 bg-red-500/10 border border-red-500/50 rounded text-red-200 text-sm">{error}</div>}
-
-            <button 
-              onClick={() => handleLogin('creator-studio')}
-              className="w-full bg-yellow-400 text-slate-900 font-bold py-3 rounded hover:bg-yellow-300 transition-colors mt-4 flex justify-center items-center"
-              disabled={loading}
-            >
-              {loading ? <Loader2 className="animate-spin" /> : 'Enter Studio'}
-            </button>
-          </div>
-          <button onClick={() => setView('welcome')} className="mt-6 text-slate-500 text-sm hover:text-white transition-colors w-full text-center">
-             &larr; Back to standard login
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-
-  // VIEW: CREATE 1 - Name
-  if (view === 'create-name') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <Card>
-          <div className="mb-6"><Logo /></div>
-          <h1 className="text-2xl text-gray-900 mb-6">Create a Isaahi Account</h1>
-          <p className="text-sm text-gray-600 mb-6">Enter your name</p>
-          
-          <div className="flex gap-4 mb-8">
-            <Input 
-              label="First name"
-              value={regData.firstName}
-              onChange={e => setRegData({...regData, firstName: e.target.value})}
-            />
-            <Input 
-              label="Last name (optional)"
-              value={regData.lastName}
-              onChange={e => setRegData({...regData, lastName: e.target.value})}
-            />
-          </div>
-
-          <div className="flex justify-between items-center">
-            <Button variant="secondary" onClick={() => setView('welcome')}>Sign in instead</Button>
-            <Button onClick={() => {
-              if(regData.firstName) setView('create-info');
-              else setError('First name is required');
-            }}>Next</Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  // VIEW: CREATE 2 - Info (Birthday/Gender)
-  if (view === 'create-info') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <Card>
-          <div className="mb-6"><Logo /></div>
-          <h1 className="text-2xl text-gray-900 mb-2">Basic information</h1>
-          <p className="text-sm text-gray-600 mb-6">Enter your birthday and gender</p>
-          
-          <div className="flex gap-2 mb-4">
-            <div className="w-1/3">
-               <Input label="Month" placeholder="MM" value={regData.month} onChange={e => setRegData({...regData, month: e.target.value})} />
-            </div>
-            <div className="w-1/3">
-               <Input label="Day" placeholder="DD" value={regData.day} onChange={e => setRegData({...regData, day: e.target.value})} />
-            </div>
-            <div className="w-1/3">
-               <Input label="Year" placeholder="YYYY" value={regData.year} onChange={e => setRegData({...regData, year: e.target.value})} />
-            </div>
-          </div>
-
-          <div className="mb-8">
-             <label className="block text-xs font-medium mb-1 text-gray-500">Gender</label>
-             <select 
-              className="w-full border border-gray-300 rounded-lg px-3 py-3 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 bg-white"
-              value={regData.gender}
-              onChange={e => setRegData({...regData, gender: e.target.value})}
-             >
-               <option value="" disabled>Select</option>
-               <option value="Female">Female</option>
-               <option value="Male">Male</option>
-               <option value="Custom">Rather not say</option>
-             </select>
-          </div>
-
-          <div className="flex justify-between items-center">
-             <button onClick={() => setView('create-name')} className="text-blue-600 font-medium text-sm">Back</button>
-            <Button onClick={() => {
-               if(regData.day && regData.month && regData.year && regData.gender) setView('create-email');
-               else setError('Please fill all fields');
-            }}>Next</Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  // VIEW: CREATE 3 - Email
-  if (view === 'create-email') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <Card>
-          <div className="mb-6"><Logo /></div>
-          <h1 className="text-2xl text-gray-900 mb-2">Choose your Isaahi address</h1>
-          <p className="text-sm text-gray-600 mb-6">Pick a specialized domain</p>
-          
-          <div className="mb-4">
-            <div className="flex items-center gap-2">
-               <div className="flex-grow">
-                 <Input 
-                    label="Username" 
-                    value={regData.emailPrefix} 
-                    onChange={e => setRegData({...regData, emailPrefix: e.target.value.replace(/[^a-zA-Z0-9.]/g, '')})}
-                    placeholder="egg.bacon"
-                    error={error}
-                  />
-               </div>
-               <div className="mb-4 pt-1">
-                 <select 
-                    className="h-[52px] border border-gray-300 rounded-lg px-2 outline-none focus:border-blue-500 bg-white text-gray-700"
-                    value={regData.domain}
-                    onChange={e => setRegData({...regData, domain: e.target.value})}
-                 >
-                   {ALLOWED_DOMAINS.map(d => <option key={d} value={d}>@{d}</option>)}
-                 </select>
-               </div>
-            </div>
-            <p className="text-xs text-gray-500">You can use letters, numbers, and periods.</p>
-          </div>
-
-          <div className="bg-blue-50 p-4 rounded-lg mb-8 border border-blue-100">
-             <label className="flex items-start gap-3 cursor-pointer">
-               <input 
-                  type="checkbox" 
-                  className="mt-1 w-4 h-4 text-blue-600 rounded"
-                  checked={regData.isCreator}
-                  onChange={e => setRegData({...regData, isCreator: e.target.checked})}
-                />
-               <div className="text-sm">
-                 <span className="font-semibold text-gray-900 block">Make this a Creator Account?</span>
-                 <span className="text-gray-600">Get access to Creator Studio, redirect links, and API tools.</span>
-               </div>
-             </label>
-          </div>
-
-          <div className="flex justify-between items-center">
-            <button onClick={() => setView('create-info')} className="text-blue-600 font-medium text-sm">Back</button>
-            <Button onClick={() => {
-              if(regData.emailPrefix.length > 2) setView('create-password');
-              else setError('Username too short');
-            }}>Next</Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  // VIEW: CREATE 4 - Password
-  if (view === 'create-password') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <Card>
-          <div className="mb-6"><Logo /></div>
-          <h1 className="text-2xl text-gray-900 mb-2">Create a strong password</h1>
-          <p className="text-sm text-gray-600 mb-6">Create a strong password with a mix of letters, numbers and symbols</p>
-          
-          <div className="mb-8">
-            <Input 
-              label="Password" 
-              type="password"
-              value={regData.password} 
-              onChange={e => setRegData({...regData, password: e.target.value})}
-              error={error}
-            />
-             <div className="text-xs text-gray-500 mt-2 flex items-center gap-2">
-                <input type="checkbox" className="rounded text-blue-600"/> Show password
-             </div>
-          </div>
-
-          <div className="flex justify-between items-center">
-            <button onClick={() => setView('create-email')} className="text-blue-600 font-medium text-sm">Back</button>
-            <Button onClick={handleCreateAccount} disabled={loading}>
-              {loading ? 'Creating...' : 'Next'}
-            </Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  // VIEW: DELETE ACCOUNT CONFIRMATION
-  if (view === 'delete-account' && isaahiUser) {
-    return (
-       <div className="min-h-screen bg-red-50 flex flex-col items-center justify-center p-4">
-        <Card className="border-red-100 shadow-red-100">
-           <div className="flex justify-center mb-6 text-red-600">
-             <AlertTriangle size={48} />
-           </div>
-           <h1 className="text-2xl font-bold text-center text-gray-900 mb-2">Delete your account</h1>
-           <p className="text-sm text-center text-gray-600 mb-8">
-             This will permanently delete your data, including all redirect links and API keys. This action cannot be undone.
-           </p>
-
-           <div className="space-y-4 mb-8">
-             <Input 
-               label="Confirm your email"
-               value={deleteEmail}
-               onChange={(e) => setDeleteEmail(e.target.value)}
-               placeholder={isaahiUser.email}
-             />
-             <Input 
-               label="Confirm your password"
-               type="password"
-               value={deletePassword}
-               onChange={(e) => setDeletePassword(e.target.value)}
-               error={error}
-             />
-           </div>
-
-           <div className="flex flex-col gap-3">
-             <Button variant="danger" onClick={handleDeleteAccount} disabled={loading}>
-                {loading ? 'Deleting Account...' : 'Permanently Delete Account'}
-             </Button>
-             <Button variant="secondary" onClick={() => setView(isaahiUser.isCreator ? 'creator-studio' : 'dashboard')}>
-                Cancel
-             </Button>
-           </div>
-        </Card>
-       </div>
-    );
-  }
-
-  // VIEW: STANDARD DASHBOARD
-  if (view === 'dashboard' && isaahiUser) {
-    return (
-      <div className="min-h-screen bg-white">
-        <header className="border-b px-6 py-3 flex justify-between items-center bg-white sticky top-0 z-10">
-          <Logo size="md" />
-          <div className="flex items-center gap-4">
-            <div className="text-right hidden sm:block">
-              <div className="text-sm font-medium text-gray-900">{isaahiUser.displayName}</div>
-              <div className="text-xs text-gray-500">{isaahiUser.email}</div>
-            </div>
-            <div className="h-8 w-8 bg-blue-600 rounded-full text-white flex items-center justify-center text-sm font-medium cursor-pointer" onClick={logout}>
-              {isaahiUser.firstName[0]}
-            </div>
-          </div>
-        </header>
-
-        <main className="max-w-4xl mx-auto p-6">
-          <h1 className="text-2xl font-normal text-gray-800 mb-6">Welcome, {isaahiUser.firstName}</h1>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="border rounded-xl p-6 hover:shadow-md transition-shadow cursor-pointer">
-               <div className="text-blue-600 mb-4"><ShieldCheck size={32}/></div>
-               <h3 className="text-lg font-medium mb-2">Security checkup</h3>
-               <p className="text-sm text-gray-600 mb-4">Your account is protected. We simulated a login event just now.</p>
-               <span className="text-blue-600 text-sm font-medium">See details</span>
-            </div>
-
-            <div className="border rounded-xl p-6 hover:shadow-md transition-shadow cursor-pointer">
-               <div className="text-blue-600 mb-4"><User size={32}/></div>
-               <h3 className="text-lg font-medium mb-2">Personal info</h3>
-               <p className="text-sm text-gray-600 mb-4">Manage your gender, birthday and contact info.</p>
-               <span className="text-blue-600 text-sm font-medium">Manage info</span>
-            </div>
-
-            <div className="border rounded-xl p-6 hover:shadow-md transition-shadow cursor-pointer border-red-100 hover:border-red-200 group" onClick={() => setView('delete-account')}>
-               <div className="text-red-500 mb-4"><Trash2 size={32}/></div>
-               <h3 className="text-lg font-medium mb-2 text-red-600">Delete account</h3>
-               <p className="text-sm text-gray-600 mb-4">Permanently remove your data and access.</p>
-               <span className="text-red-500 text-sm font-medium group-hover:underline">Delete service</span>
-            </div>
-
-            {isaahiUser.isCreator && (
-              <div className="border rounded-xl p-6 bg-slate-900 text-white hover:shadow-xl transition-shadow cursor-pointer col-span-1 md:col-span-2 relative overflow-hidden group" onClick={() => setView('creator-studio')}>
-                 <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
-                   <Zap size={120} />
-                 </div>
-                 <div className="relative z-10">
-                    <div className="text-yellow-400 mb-4"><LayoutDashboard size={32}/></div>
-                    <h3 className="text-lg font-bold mb-2">Creator Studio</h3>
-                    <p className="text-sm text-slate-300 mb-4">You have a creator account. Access your links and API keys here.</p>
-                    <span className="text-yellow-400 text-sm font-bold flex items-center gap-2">Go to Studio <ArrowRight size={14}/></span>
-                 </div>
-              </div>
-            )}
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // VIEW: CREATOR STUDIO
-  if (view === 'creator-studio' && isaahiUser) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex">
-        {/* Sidebar */}
-        <aside className="w-64 bg-slate-900 text-slate-300 flex-shrink-0 hidden md:flex flex-col">
-           <div className="p-6">
-             <div className="flex items-center gap-2 text-white font-bold text-xl mb-8">
-               <Zap className="text-yellow-400" />
-               Isaahi Studio
-             </div>
-             <nav className="space-y-2">
-               <div className="bg-slate-800 text-white px-4 py-2 rounded-lg flex items-center gap-3 cursor-pointer">
-                 <LayoutDashboard size={18} /> Dashboard
-               </div>
-               <div className="hover:bg-slate-800 hover:text-white px-4 py-2 rounded-lg flex items-center gap-3 cursor-pointer transition-colors">
-                 <LinkIcon size={18} /> Redirects
-               </div>
-               <div className="hover:bg-slate-800 hover:text-white px-4 py-2 rounded-lg flex items-center gap-3 cursor-pointer transition-colors">
-                 <Key size={18} /> API Keys
-               </div>
-             </nav>
-           </div>
-           <div className="mt-auto p-6 border-t border-slate-800">
-              <button onClick={logout} className="flex items-center gap-2 hover:text-white transition-colors">
-                <LogOut size={16} /> Sign out
-              </button>
-           </div>
-        </aside>
-
-        {/* Content */}
-        <main className="flex-1 overflow-y-auto">
-          <header className="bg-white border-b px-8 py-4 flex justify-between items-center">
-            <h2 className="text-xl font-bold text-slate-800">Overview</h2>
-            <div className="flex items-center gap-4">
-               <div className="text-right">
-                 <div className="text-sm font-bold text-slate-900">{isaahiUser.displayName}</div>
-                 <div className="text-xs text-slate-500">Creator Account</div>
-               </div>
-               <div className="h-10 w-10 bg-yellow-400 rounded-full flex items-center justify-center text-slate-900 font-bold">
-                 {isaahiUser.firstName[0]}
-               </div>
-            </div>
-          </header>
-
-          <div className="p-8 space-y-8">
-            {/* API Key Section */}
-            <div className="bg-white rounded-xl shadow-sm border p-6">
-               <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                      <Key size={18} className="text-slate-400"/> Auth Credentials
-                    </h3>
-                    <p className="text-slate-500 text-sm">Use this key to authenticate your creator tools.</p>
-                  </div>
-                  <button onClick={regenerateKey} className="text-sm text-blue-600 hover:underline">Roll Key</button>
-               </div>
-               <div className="bg-slate-100 p-4 rounded-lg font-mono text-sm text-slate-700 break-all border border-slate-200 flex justify-between items-center group">
-                  <span>{isaahiUser.apiKey || 'No key generated'}</span>
-                  <button className="text-slate-400 hover:text-slate-600" onClick={() => {
-                     // Clipboard logic placeholder
-                  }}>
-                    <div className="bg-slate-200 px-2 py-1 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity">Copy</div>
-                  </button>
-               </div>
-            </div>
-
-            {/* Redirect Links Section */}
-            <div className="bg-white rounded-xl shadow-sm border p-6">
-               <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                 <LinkIcon size={18} className="text-slate-400"/> Redirect Links
-               </h3>
-               
-               <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 mb-6 bg-slate-50 p-4 rounded-lg border border-slate-100">
-                  <input 
-                    placeholder="/short-link (Source)"
-                    className="bg-white border border-gray-200 rounded px-3 py-2 text-sm outline-none focus:border-blue-500"
-                    value={newLink.source}
-                    onChange={e => setNewLink({...newLink, source: e.target.value})}
-                  />
-                  <input 
-                    placeholder="https://destination.com"
-                    className="bg-white border border-gray-200 rounded px-3 py-2 text-sm outline-none focus:border-blue-500"
-                    value={newLink.destination}
-                    onChange={e => setNewLink({...newLink, destination: e.target.value})}
-                  />
-                  <button 
-                    onClick={createLink}
-                    className="bg-slate-900 text-white px-4 py-2 rounded text-sm font-medium hover:bg-slate-800 transition-colors"
-                  >
-                    Create Link
-                  </button>
-               </div>
-
-               <div className="space-y-2">
-                 {links.length === 0 ? (
-                   <div className="text-center py-8 text-slate-400 text-sm">No redirects created yet.</div>
-                 ) : (
-                   links.map(link => (
-                     <div key={link.id} className="flex items-center justify-between p-3 border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
-                        <div className="flex-1 grid grid-cols-2 gap-4">
-                           <div className="font-medium text-slate-700 flex items-center gap-2">
-                              <span className="text-slate-400">isaahi.com</span>
-                              {link.source}
-                           </div>
-                           <div className="text-slate-500 text-sm truncate">{link.destination}</div>
+        <!-- VIEW: CREATE NAME -->
+        <section id="view-create-name" class="view-section flex-1 flex-col items-center justify-center p-4">
+            <div class="glass-card p-10 w-full max-w-[450px] fade-in">
+                <div class="mb-6"><i data-lucide="shield-check" class="text-blue-600" width="32"></i></div>
+                <h2 class="text-2xl text-slate-900 mb-6">What's your name?</h2>
+                
+                <div class="flex gap-4 mb-6">
+                    <div class="w-1/2">
+                        <label class="block text-xs font-medium text-slate-500 mb-1">First</label>
+                        <div class="input-wrapper border border-slate-300 rounded-lg px-3 py-2">
+                            <input type="text" id="reg-fname" class="w-full outline-none text-sm">
                         </div>
-                        <button onClick={() => deleteLink(link.id)} className="text-red-500 hover:text-red-700 ml-4">
-                          <LogOut size={16} className="rotate-180"/> {/* Just a remove icon */}
+                    </div>
+                    <div class="w-1/2">
+                        <label class="block text-xs font-medium text-slate-500 mb-1">Last</label>
+                        <div class="input-wrapper border border-slate-300 rounded-lg px-3 py-2">
+                            <input type="text" id="reg-lname" class="w-full outline-none text-sm">
+                        </div>
+                    </div>
+                </div>
+                
+                <button onclick="actions.checkName()" class="w-full bg-blue-600 text-white px-6 py-2.5 rounded-full font-medium text-sm hover:bg-blue-700 shadow-sm">Next</button>
+            </div>
+        </section>
+
+        <!-- VIEW: CREATE EMAIL -->
+        <section id="view-create-email" class="view-section flex-1 flex-col items-center justify-center p-4">
+            <div class="glass-card p-10 w-full max-w-[450px] fade-in">
+                <div class="mb-6"><i data-lucide="shield-check" class="text-blue-600" width="32"></i></div>
+                <h2 class="text-2xl text-slate-900 mb-6">Choose address</h2>
+                
+                <div class="mb-6">
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Username</label>
+                    <div class="input-wrapper border border-slate-300 rounded-lg px-3 py-2 flex items-center bg-white">
+                        <input type="text" id="reg-user" class="w-full outline-none text-sm" placeholder="username">
+                        <span class="text-slate-400 text-xs font-medium ml-2">@isaahi.com</span>
+                    </div>
+                </div>
+
+                <label class="flex gap-3 p-4 border rounded-xl bg-blue-50 border-blue-100 cursor-pointer mb-8 hover:border-blue-200 transition-colors">
+                    <input type="checkbox" id="reg-is-creator" class="mt-0.5 accent-blue-600 w-4 h-4">
+                    <div>
+                        <span class="block text-sm font-medium text-blue-900">Creator Account Access</span>
+                        <span class="block text-xs text-blue-700/70">Enable developer tools and API keys.</span>
+                    </div>
+                </label>
+                
+                <div class="flex justify-between items-center">
+                    <button onclick="router.go('create-name')" class="text-blue-600 font-medium text-sm">Back</button>
+                    <button onclick="actions.checkRegEmail()" class="bg-blue-600 text-white px-6 py-2.5 rounded-full font-medium text-sm shadow-sm">Next</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW: CREATE PASSWORD -->
+        <section id="view-create-password" class="view-section flex-1 flex-col items-center justify-center p-4">
+            <div class="glass-card p-10 w-full max-w-[450px] fade-in">
+                <div class="mb-6"><i data-lucide="shield-check" class="text-blue-600" width="32"></i></div>
+                <h2 class="text-2xl text-slate-900 mb-6">Secure account</h2>
+                
+                <div class="mb-8">
+                    <label class="block text-xs font-medium text-slate-500 mb-1">Password</label>
+                    <div class="input-wrapper border border-slate-300 rounded-lg px-3 py-2 bg-white">
+                        <input type="password" id="reg-pass" class="w-full outline-none text-sm">
+                    </div>
+                </div>
+                
+                <button id="btn-create" onclick="actions.createAccount()" class="w-full bg-blue-600 text-white px-6 py-2.5 rounded-full font-medium text-sm shadow-sm hover:bg-blue-700">Initialize Identity</button>
+            </div>
+        </section>
+
+        <!-- VIEW: DASHBOARD -->
+        <section id="view-dashboard" class="view-section p-8 max-w-4xl mx-auto w-full">
+            <div class="flex justify-between items-end mb-8">
+                <h1 class="text-3xl font-light text-slate-900">Welcome, <span id="dash-name" class="font-medium">User</span></h1>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Profile Card -->
+                <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                    <h3 class="font-bold text-slate-400 text-xs uppercase tracking-wider mb-4">Identity</h3>
+                    <div id="dash-email-display" class="font-medium text-lg mb-1"></div>
+                    <div class="text-green-600 text-sm flex items-center gap-1 font-medium">
+                        <i data-lucide="check-circle-2" width="14"></i> Active Status
+                    </div>
+                    <div class="mt-6 pt-6 border-t border-slate-50">
+                        <button onclick="router.go('delete-account')" class="text-xs text-red-500 hover:text-red-700 font-bold uppercase tracking-wide">Delete Account</button>
+                    </div>
+                </div>
+
+                <!-- Creator Promo -->
+                <div id="creator-entry" class="bg-slate-900 text-white rounded-2xl p-6 shadow-lg cursor-pointer hover:scale-[1.01] transition-transform hidden" onclick="router.go('creator-studio')">
+                    <i data-lucide="zap" class="text-yellow-400 mb-2"></i>
+                    <h3 class="font-bold text-lg">Creator Studio</h3>
+                    <p class="text-slate-400 text-sm mb-4">Manage API keys & redirects</p>
+                    <span class="text-xs font-bold uppercase tracking-widest text-yellow-400 flex items-center gap-2">Enter <i data-lucide="arrow-right" width="14"></i></span>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW: DELETE ACCOUNT -->
+        <section id="view-delete-account" class="view-section flex-1 flex-col items-center justify-center p-4">
+             <div class="glass-card p-10 w-full max-w-[450px] border-red-100 text-center fade-in">
+                <div class="flex justify-center mb-6 text-red-500"><i data-lucide="alert-triangle" width="48" height="48"></i></div>
+                <h2 class="text-xl font-bold uppercase mb-2">Terminate Identity</h2>
+                <p class="text-slate-500 text-sm mb-8">This action is permanent. Enter credentials to confirm.</p>
+                
+                <div class="text-left space-y-4 mb-8">
+                    <div>
+                        <label class="text-xs font-bold text-slate-400 uppercase">Confirm Email</label>
+                        <div class="input-wrapper border border-slate-200 rounded-lg px-3 py-2 bg-slate-50"><input type="email" id="del-email" class="w-full bg-transparent outline-none text-sm"></div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-slate-400 uppercase">Security Key</label>
+                        <div class="input-wrapper border border-slate-200 rounded-lg px-3 py-2 bg-slate-50"><input type="password" id="del-password" class="w-full bg-transparent outline-none text-sm"></div>
+                    </div>
+                </div>
+
+                <div class="flex flex-col gap-3">
+                    <button onclick="actions.handleDelete()" class="bg-red-500 text-white px-6 py-3 rounded-xl font-bold text-sm uppercase tracking-widest hover:bg-red-600 shadow-lg shadow-red-100">Permanently Delete</button>
+                    <button onclick="router.go('dashboard')" class="text-xs font-bold text-slate-400 uppercase tracking-widest hover:text-slate-600">Cancel</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW: CREATOR STUDIO -->
+        <section id="view-creator-studio" class="view-section p-8 max-w-4xl mx-auto w-full">
+            <button onclick="router.go('dashboard')" class="text-sm font-bold text-slate-400 hover:text-blue-600 mb-6 flex items-center gap-1 transition-colors">
+                <i data-lucide="arrow-left" width="16"></i> Back to Dashboard
+            </button>
+
+            <div class="space-y-6">
+                <!-- API Key Card -->
+                <div class="bg-slate-900 text-white rounded-2xl p-8 shadow-xl">
+                    <div class="flex justify-between items-start mb-4">
+                        <h3 class="font-bold text-blue-400 flex items-center gap-2"><i data-lucide="key" width="18"></i> API Key</h3>
+                        <span class="text-[10px] uppercase font-bold bg-blue-900 text-blue-200 px-2 py-1 rounded">Live</span>
+                    </div>
+                    <div class="bg-slate-800 p-4 rounded-lg font-mono text-sm flex justify-between items-center border border-slate-700">
+                        <span id="studio-api-key" class="truncate mr-4 text-slate-300"></span>
+                        <button onclick="actions.copyKey()" class="text-blue-400 hover:text-white transition-colors">
+                            <i data-lucide="copy" width="16"></i>
                         </button>
-                     </div>
-                   ))
-                 )}
-               </div>
+                    </div>
+                </div>
+
+                <!-- Links Card -->
+                <div class="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">
+                    <h3 class="font-bold mb-6 flex items-center gap-2 text-slate-900"><i data-lucide="link" width="18"></i> Redirects</h3>
+                    
+                    <div class="flex flex-col md:flex-row gap-3 mb-6">
+                        <input id="link-src" placeholder="/source" class="border rounded-lg px-4 py-2 flex-1 text-sm bg-slate-50 outline-none focus:bg-white focus:border-blue-500 transition-colors">
+                        <input id="link-dst" placeholder="https://destination.com" class="border rounded-lg px-4 py-2 flex-1 text-sm bg-slate-50 outline-none focus:bg-white focus:border-blue-500 transition-colors">
+                        <button onclick="actions.createLink()" class="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold text-xs uppercase tracking-widest hover:bg-black">Add</button>
+                    </div>
+
+                    <div id="links-list" class="space-y-2">
+                        <!-- Links injected here -->
+                    </div>
+                </div>
             </div>
+        </section>
 
-            {/* Danger Zone */}
-            <div className="mt-12 pt-12 border-t border-slate-200">
-               <h3 className="text-red-600 font-bold mb-4 flex items-center gap-2">
-                  <AlertTriangle size={18} /> Danger Zone
-               </h3>
-               <div className="bg-red-50 border border-red-100 rounded-xl p-6 flex items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-red-900">Delete Creator Account</h4>
-                    <p className="text-red-700 text-sm">Once you delete your account, there is no going back. Please be certain.</p>
-                  </div>
-                  <button onClick={() => setView('delete-account')} className="bg-white border border-red-200 text-red-600 px-4 py-2 rounded font-medium text-sm hover:bg-red-50 transition-colors">
-                    Delete Account
-                  </button>
-               </div>
+        <!-- VIEW: MANUAL (Fixed Exit) -->
+        <section id="view-manual" class="view-section bg-white min-h-screen z-50 absolute top-0 left-0 w-full">
+            <div class="border-b px-8 py-4 flex justify-between items-center sticky top-0 bg-white/95 backdrop-blur z-50">
+                <div class="flex items-center gap-2 font-bold text-xl text-blue-600">
+                    <i data-lucide="shield-check"></i> Isaahi
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="actions.copyManual()" class="border border-slate-200 text-slate-600 px-4 py-2 rounded-full font-bold text-xs uppercase tracking-widest hover:bg-slate-50 flex items-center gap-2 transition-colors">
+                        <i data-lucide="copy" width="14"></i> Copy Code
+                    </button>
+                    <button onclick="router.goBack()" class="bg-slate-900 text-white px-6 py-2 rounded-full font-bold text-xs uppercase tracking-widest hover:bg-slate-800 transition-colors">Exit</button>
+                </div>
             </div>
+            
+            <main class="max-w-3xl mx-auto p-12 space-y-12">
+                <div>
+                    <h1 class="text-4xl font-bold mb-4 text-slate-900">Integration Manual</h1>
+                    <p class="text-lg text-slate-600 leading-relaxed">Add secure, passwordless-style authentication and link management to your applications using the Isaahi Identity Platform.</p>
+                </div>
 
-          </div>
-        </main>
-      </div>
-    );
-  }
+                <div>
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2"><i data-lucide="terminal" class="text-blue-600"></i> Installation</h2>
+                    <div class="bg-slate-900 rounded-xl p-6 overflow-x-auto border border-slate-800">
+                        <code class="font-mono text-sm text-blue-200">&lt;script src="https://cdn.isaahi.com/sdk/v1/isaahi.js"&gt;&lt;/script&gt;</code>
+                    </div>
+                </div>
 
-  return <div className="p-4">Loading...</div>;
-}
+                <div>
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2"><i data-lucide="code-2" class="text-blue-600"></i> Usage</h2>
+                    <div class="bg-slate-900 rounded-xl p-6 overflow-x-auto border border-slate-800">
+<pre class="font-mono text-sm text-blue-200">
+const isaahi = new Isaahi({
+  apiKey: 'isa_live_xxxxxxxx' 
+});
+
+// Trigger Login Flow
+const user = await isaahi.login();
+console.log(user.email);
+</pre>
+                    </div>
+                </div>
+            </main>
+        </section>
+
+    </div>
+
+    <!-- Firebase & App Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, query, where, getDocs, addDoc, deleteDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- CONFIG ---
+        const firebaseConfig = JSON.parse('__firebase_config');
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // --- STATE ---
+        const state = {
+            profile: null,  // Current Logged-in User Profile
+            prevView: 'welcome' // Tracks where we came from for the Manual exit
+        };
+
+        // --- ROUTER ---
+        window.router = {
+            go: (viewName) => {
+                // If we are navigating TO manual, record where we came FROM
+                const currentActive = document.querySelector('.view-section.active, .view-section.active-block');
+                if (viewName === 'manual' && currentActive) {
+                    state.prevView = currentActive.id.replace('view-', '');
+                }
+
+                // Hide all views
+                document.querySelectorAll('.view-section').forEach(el => {
+                    el.classList.remove('active', 'active-block');
+                    el.style.display = 'none';
+                });
+
+                // Show target view
+                const target = document.getElementById(`view-${viewName}`);
+                if (!target) return;
+
+                // Handle Navbar Visibility & View Classes
+                const nav = document.getElementById('main-nav');
+                
+                if (['dashboard', 'creator-studio'].includes(viewName)) {
+                    nav.classList.remove('hidden');
+                    nav.classList.add('flex');
+                    target.classList.add('active-block'); // Dashboard/Studio are block layouts
+                } else if (viewName === 'manual') {
+                    nav.classList.remove('flex');
+                    nav.classList.add('hidden');
+                    target.classList.add('active-block'); // Manual is block
+                } else {
+                    nav.classList.remove('flex');
+                    nav.classList.add('hidden');
+                    target.classList.add('active'); // Auth screens are flex centered
+                }
+                
+                // Refresh Icons
+                lucide.createIcons();
+                window.scrollTo(0,0);
+            },
+            goBack: () => {
+                // The fixed Exit logic
+                if (state.prevView) {
+                    router.go(state.prevView);
+                } else {
+                    // Fallback if history lost
+                    if (state.profile) {
+                         router.go(state.profile.isCreator ? 'creator-studio' : 'dashboard');
+                    } else {
+                         router.go('welcome');
+                    }
+                }
+            }
+        };
+
+        // --- UI UTILS ---
+        const ui = {
+            toast: (msg, type = 'error') => {
+                const con = document.getElementById('toast-container');
+                const el = document.createElement('div');
+                el.className = `p-4 rounded-xl shadow-lg border flex items-center gap-3 text-sm font-bold animate-in fade-in slide-in-from-top-2 ${type === 'error' ? 'bg-red-50 border-red-100 text-red-600' : 'bg-slate-900 border-slate-800 text-white'}`;
+                el.innerHTML = `<span>${msg}</span>`;
+                con.appendChild(el);
+                setTimeout(() => el.remove(), 3000);
+            },
+            renderLinks: (links) => {
+                const list = document.getElementById('links-list');
+                list.innerHTML = '';
+                if(links.length === 0) {
+                    list.innerHTML = '<div class="text-center text-slate-400 text-xs py-4">No active redirects</div>';
+                    return;
+                }
+                links.forEach(l => {
+                    const div = document.createElement('div');
+                    div.className = "flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-100 hover:border-slate-300 transition-colors";
+                    div.innerHTML = `
+                        <div class="font-mono text-xs text-slate-600">
+                            <span class="text-blue-600 font-bold">isaahi.com${l.source}</span> → ${l.destination}
+                        </div>
+                        <button onclick="actions.delLink('${l.id}')" class="text-slate-400 hover:text-red-500 transition-colors"><i data-lucide="trash-2" width="14"></i></button>
+                    `;
+                    list.appendChild(div);
+                });
+                lucide.createIcons();
+            }
+        };
+
+        // --- ACTIONS ---
+        window.actions = {
+            checkEmail: () => {
+                const val = document.getElementById('login-email').value;
+                if (!val || !val.includes('@')) return ui.toast('Enter a valid email');
+                document.getElementById('display-email').innerText = val;
+                router.go('login-password');
+            },
+            login: async () => {
+                const email = document.getElementById('login-email').value;
+                const pass = document.getElementById('login-password').value;
+                const btn = document.getElementById('btn-login');
+                
+                btn.innerText = "Verifying...";
+                btn.disabled = true;
+
+                try {
+                    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'users'), where('email', '==', email));
+                    const snap = await getDocs(q);
+                    
+                    if (snap.empty) throw new Error("Account not found");
+                    const data = snap.docs[0].data();
+                    if (data.password !== pass) throw new Error("Incorrect password");
+                    
+                    state.profile = { id: snap.docs[0].id, ...data };
+                    authManager.updateUI();
+                    router.go(state.profile.isCreator ? 'creator-studio' : 'dashboard');
+                } catch (e) {
+                    ui.toast(e.message);
+                } finally {
+                    btn.innerText = "Sign in";
+                    btn.disabled = false;
+                }
+            },
+            checkName: () => {
+                const f = document.getElementById('reg-fname').value;
+                if (!f) return ui.toast('First name required');
+                router.go('create-email');
+            },
+            checkRegEmail: () => {
+                const u = document.getElementById('reg-user').value;
+                if (!u) return ui.toast('Username required');
+                router.go('create-password');
+            },
+            createAccount: async () => {
+                const btn = document.getElementById('btn-create');
+                const email = document.getElementById('reg-user').value + "@isaahi.com";
+                const pass = document.getElementById('reg-pass').value;
+                const fname = document.getElementById('reg-fname').value;
+                const lname = document.getElementById('reg-lname').value;
+                const isCreator = document.getElementById('reg-is-creator').checked;
+
+                if (pass.length < 6) return ui.toast("Password too short");
+
+                btn.innerText = "Creating...";
+                btn.disabled = true;
+
+                try {
+                    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'users'), where('email', '==', email));
+                    const snap = await getDocs(q);
+                    if (!snap.empty) throw new Error("Username taken");
+
+                    const userData = {
+                        firstName: fname,
+                        lastName: lname,
+                        displayName: `${fname} ${lname}`,
+                        email: email,
+                        password: pass,
+                        isCreator: isCreator,
+                        createdAt: new Date().toISOString(),
+                        apiKey: isCreator ? 'isa_live_' + Math.random().toString(36).slice(2) : null
+                    };
+
+                    const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'users'), userData);
+                    state.profile = { id: docRef.id, ...userData };
+                    authManager.updateUI();
+                    router.go(isCreator ? 'creator-studio' : 'dashboard');
+                } catch (e) {
+                    ui.toast(e.message);
+                } finally {
+                    btn.innerText = "Initialize Identity";
+                    btn.disabled = false;
+                }
+            },
+            copyKey: () => {
+                navigator.clipboard.writeText(state.profile.apiKey);
+                ui.toast("API Key Copied", "success");
+            },
+            copyManual: () => {
+                 navigator.clipboard.writeText(`<script src="https://cdn.isaahi.com/sdk.js"><\/script>`);
+                 ui.toast("Code Copied", "success");
+            },
+            createLink: async () => {
+                const src = document.getElementById('link-src').value;
+                const dst = document.getElementById('link-dst').value;
+                if(!src || !dst) return ui.toast("Fields required");
+
+                try {
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'links'), {
+                        ownerEmail: state.profile.email,
+                        source: src.startsWith('/') ? src : '/' + src,
+                        destination: dst,
+                        createdAt: new Date().toISOString()
+                    });
+                    document.getElementById('link-src').value = '';
+                    document.getElementById('link-dst').value = '';
+                    ui.toast("Redirect Active", "success");
+                } catch(e) { ui.toast("Error creating link"); }
+            },
+            delLink: async (id) => {
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'links', id));
+                } catch(e) { ui.toast("Delete failed"); }
+            },
+            handleDelete: async () => {
+                 const email = document.getElementById('del-email').value;
+                 const pass = document.getElementById('del-password').value;
+                 
+                 if (email !== state.profile.email || pass !== state.profile.password) {
+                     return ui.toast("Credentials Mismatch");
+                 }
+ 
+                 try {
+                     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', state.profile.id));
+                     ui.toast("Identity Terminated", 'success');
+                     authManager.logout();
+                 } catch (e) {
+                     ui.toast("Termination Failed");
+                 }
+            }
+        };
+
+        // --- AUTH MANAGER ---
+        window.authManager = {
+            logout: () => {
+                state.profile = null;
+                router.go('welcome');
+                ['login-email', 'login-password', 'reg-fname', 'reg-lname', 'reg-user', 'reg-pass'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if(el) el.value = '';
+                });
+            },
+            updateUI: () => {
+                const p = state.profile;
+                if (!p) return;
+                
+                document.getElementById('nav-user-name').innerText = p.displayName;
+                document.getElementById('nav-user-role').innerText = p.isCreator ? 'Creator' : 'Member';
+                document.getElementById('dash-name').innerText = p.firstName;
+                document.getElementById('dash-email-display').innerText = p.email;
+                
+                const creatorBtn = document.getElementById('creator-entry');
+                if (p.isCreator) {
+                    creatorBtn.classList.remove('hidden');
+                    document.getElementById('studio-api-key').innerText = p.apiKey;
+                    // Listen for links
+                    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'links'), where('ownerEmail', '==', p.email));
+                    onSnapshot(q, snap => {
+                        const links = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                        ui.renderLinks(links);
+                    });
+                } else {
+                    creatorBtn.classList.add('hidden');
+                }
+            }
+        };
+
+        // --- INIT ---
+        window.onload = async () => {
+            lucide.createIcons();
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+    </script>
+</body>
+</html>
 
 
